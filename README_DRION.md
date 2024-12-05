@@ -24,3 +24,5 @@ print("Noms des colonnes numériques dont la somme des valeurs absolues est éga
 
 external_data_cleaned_1 = external_data.drop(columns=colonnes_somme_zero)
 _________________________________________________________________________________________________________
+
+Nous sélectionnons ensuite uniquement les valeurs d'intérêts pour l'entraînement, stockées dans la variable external_data_train. Nous faisons de même pour l'échantillon test avec external_data_test
