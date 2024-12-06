@@ -3,7 +3,7 @@ import os
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import TimeSeriesSplit
-from external_data.example_estimator import _merge_external_data, _encode_dates
+import external_data.example_estimator as ex 
 
 problem_title = "Bike count prediction"
 _target_column_name = "log_bike_count"
@@ -24,14 +24,19 @@ def get_train_data(path="data/train.parquet"):
     # Sort by date first, so that time based cross-validation would produce correct results
     data = data.sort_values(["date", "counter_name"])
     
-    data = _merge_external_data(data)
+    data = ex._merge_external_data(data)
     
     # Dropping irrelevant columns
     data = data.drop(columns=["coordinates", "counter_id", "counter_name", "site_name",
                                             "counter_installation_date","counter_technical_id"])
-    data = _encode_dates(data)
     
-    y_array = data[_target_column_name].values
-    X_df = data.drop([_target_column_name, "bike_count"], axis=1)
-
-    return X_df, y_array
+    data = ex.calculate_sunrise_sunset_astral(data)
+    data = ex._encode_dates(data)
+    
+    if _target_column_name in data.columns:
+        y_array = data[_target_column_name].values
+        X_df = data.drop([_target_column_name, "bike_count"], axis=1)
+        
+        return X_df, y_array
+    else:
+        return data
