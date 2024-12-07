@@ -1,4 +1,5 @@
 astral==3.2
+jours_feries_france==0.7.0
 numpy==1.21.6
 pandas==1.3.5
 pytz==2024.2

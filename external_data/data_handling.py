@@ -1,17 +1,14 @@
 from pathlib import Path
 import numpy as np
 import pandas as pd
-from astral.sun import sun
-from astral.geocoder import LocationInfo
-import pytz
 import os
 
 from sklearn.preprocessing import FunctionTransformer
 from sklearn.preprocessing import OneHotEncoder
-from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.linear_model import Ridge
+from sklearn.preprocessing import StandardScaler
 
 
 
@@ -55,72 +52,6 @@ def weather_cleaning(weather):
     return weather
 
 
-# Long function but it is well optimized (80 s --> 10 s runtime !!)
-def calculate_sunrise_sunset_astral(df):
-    """
-    Calculate if the sun is up for each timestamp in the dataframe, adding a column to the df.
-    Assumes a 'date' column with complete timestamps and 'latitude', 'longitude' columns.
-    """
-    # Convert 'date' to datetime, coerce errors to NaT
-    df['date'] = pd.to_datetime(df['date'], errors='coerce', utc=True)
-    
-    # Drop rows where 'date' is NaT
-    df = df.dropna(subset=['date'])
-    
-    # Convert 'date' to Europe/Paris timezone
-    df['date'] = df['date'].dt.tz_convert('Europe/Paris')
-    
-    # Extract 'date_only' (date without time)
-    df['date_only'] = df['date'].dt.date
-    
-    # Drop any rows where 'date_only' is NaT, just in case
-    df = df.dropna(subset=['date_only'])
-    
-    # Get unique combinations
-    unique_locations = df[['date_only', 'latitude', 'longitude']].drop_duplicates()
-    
-    def compute_sunrise_sunset(row):
-        if pd.isnull(row['date_only']):
-            return pd.Series({'sunrise': pd.NaT, 'sunset': pd.NaT})
-        location = LocationInfo(
-            name="Custom",
-            region="Custom",
-            timezone="Europe/Paris",
-            latitude=row['latitude'],
-            longitude=row['longitude']
-        )
-        date_naive = row['date_only']
-        tz = pytz.timezone(location.timezone)
-        try:
-            s = sun(location.observer, date=date_naive, tzinfo=tz)
-            sunrise = s['sunrise']
-            sunset = s['sunset']
-        except Exception as e:
-            # Handle exceptions from the sun function
-            sunrise = pd.NaT
-            sunset = pd.NaT
-        return pd.Series({'sunrise': sunrise, 'sunset': sunset})
-    
-    # Apply the function to unique combinations
-    unique_locations[['sunrise', 'sunset']] = unique_locations.apply(
-        compute_sunrise_sunset, axis=1
-    )
-    
-    # Merge back to original DataFrame
-    df = df.merge(unique_locations, on=['date_only', 'latitude', 'longitude'], how='left')
-    
-    # Drop rows with missing sunrise/sunset times
-    df = df.dropna(subset=['sunrise', 'sunset'])
-    
-    # Check if the timestamp is between sunrise and sunset
-    df['is_sun_up'] = (df['date'] >= df['sunrise']) & (df['date'] <= df['sunset'])
-    
-    # Drop temporary columns if desired
-    df = df.drop(columns=['date_only', 'sunrise', 'sunset'])
-    
-    return df
-
-
 def train_test_split_temporal(X, y, delta_threshold="30 days"):
     """
     Split the data into training and validation sets based on a temporal cutoff.
@@ -137,40 +68,8 @@ def train_test_split_temporal(X, y, delta_threshold="30 days"):
     y_train, y_valid = y[mask], y[~mask]
     return X_train, y_train, X_valid, y_valid
 
-# Dividing a day into 4 relevant sections
-def assign_time_interval(hour):
-    if 5 <= hour < 9:
-        return 'morning'
-    elif 9 <= hour < 15:
-        return 'working_hours'
-    elif 15 <= hour < 20:
-        return 'peak_hours'
-    else:
-        return 'calm'
 
-def _encode_dates(X):
-    X = X.copy()  # modify a copy of X
-    # Encode the date information from the DateOfDeparture columns
-    X.loc[:, "year"] = X["date"].dt.year
-    X.loc[:, "month"] = X["date"].dt.month
-    X.loc[:, "day"] = X["date"].dt.day
-    X.loc[:, "weekday"] = X["date"].dt.weekday
-    X.loc[:, "hour"] = X["date"].dt.hour
-    X['is_weekend'] = X['weekday'].apply(lambda x: 1 if x >= 5 else 0)
-    
-    X['season'] = X['month'] % 12 // 3 # Winter=0, Spring=1, Summer=2, Fall=3
-    X['time_interval'] = X['hour'].apply(assign_time_interval)
-    
-    # One-hot encoding for day_of_week and season
-    X = pd.get_dummies(X, columns=['weekday', 'season'], prefix=['day', 'season'])
-    # One-hot encoding time_interval
-    X = pd.get_dummies(X, columns=['time_interval'], prefix='time')
-    
-    # Finally we can drop the original columns from the dataframe
-    return X.drop(columns=["date"])
-
-
-def _merge_external_data(X, external_data_path="external_data/external_data.csv", merge_columns=None, additional_functions=None):
+def _merge_external_data(X, external_data_path="../external_data/external_data.csv", merge_columns=None, additional_functions=None):
     """
     Merges the initial dataset X with an external dataset, aligning by the closest timestamp.
     
@@ -238,3 +137,51 @@ def get_estimator():
     )
 
     return pipe
+
+def scaling(df):
+    scaler = StandardScaler()
+    columns_to_scale = ['']
+
+    df[columns_to_scale] = scaler.fit_transform(df[columns_to_scale])
+    
+def add_arrondissement(df):
+    """
+    Adds district information to the DataFrame based on a predefined dictionary.
+    """
+    district_mapping = {
+        '28 boulevard Diderot': 12,
+        '39 quai François Mauriac': 13,
+        "18 quai de l'Hôtel de Ville": 4,
+        'Voie Georges Pompidou': 4,
+        '67 boulevard Voltaire SE-NO': 11,
+        'Face au 48 quai de la marne': 19,
+        "Face 104 rue d'Aubervilliers": 19,
+        'Face au 70 quai de Bercy': 12,
+        '6 rue Julia Bartet': 16,
+        "Face au 25 quai de l'Oise": 19,
+        '152 boulevard du Montparnasse': 14,
+        'Totem 64 Rue de Rivoli': 1,
+        'Pont des Invalides S-N': 7,
+        'Pont de la Concorde S-N': 7,
+        'Pont des Invalides N-S': 7,
+        'Face au 8 avenue de la porte de Charenton': 12,
+        'Face au 4 avenue de la porte de Bagnolet': 20,
+        'Pont Charles De Gaulle': 13,
+        '36 quai de Grenelle': 15,
+        "Face au 40 quai D'Issy": 15,
+        'Pont de Bercy': 12,
+        '38 rue Turbigo': 3,
+        "Quai d'Orsay": 7,
+        '27 quai de la Tournelle': 5,
+        "Totem 85 quai d'Austerlitz": 13,
+        'Totem Cours la Reine': 8,
+        'Totem 73 boulevard de Sébastopol': 1,
+        '90 Rue De Sèvres': 7,
+        '20 Avenue de Clichy': 17,
+        '254 rue de Vaugirard': 15
+    }
+    # Apply the district mapping
+    df = df.copy()
+    df['arrondissement'] = df['site_name'].map(district_mapping)
+    
+    return df
