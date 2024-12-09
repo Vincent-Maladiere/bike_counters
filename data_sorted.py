@@ -75,15 +75,10 @@ def add_temporal_features(df):
     
     # Additional useful time features
     df['is_weekend'] = df['weekday'].isin([5, 6]).astype(int)
-    df['is_holiday'] = 0  # You could add French holidays here
+    holidays = pd.to_datetime(['2020-11-01', '2020-11-11', '2020-12-25', '2021-01-01', '2021-04-05',
+                               '2021-05-01', '2021-05-13', '2021-05-24', '2021-07-14', '2021-08-15'])
+    df['is_holiday'] = df['date'].isin(holidays).astype(int)
     df['season'] = df['month'].map(lambda m: (m%12 + 3)//3)
-    
-    # Time of day categories
-    df['time_of_day'] = pd.cut(
-        df['hour'],
-        bins=[-np.inf, 6, 12, 18, np.inf],
-        labels=['night', 'morning', 'afternoon', 'evening']
-    )
     
     return df
 
@@ -113,6 +108,8 @@ def main():
 
 if __name__ == "__main__":
     processed_data = main()
+    processed_data.drop(columns=['counter_name', 'site_id', 'site_name', 'bike_count', 'date', 'counter_installation_date', 'coordinates', 'counter_technical_id', 'log_bike_count', 'season'], inplace=True)
     print("Data shape:", processed_data.shape)
     print("\nSample of processed data:")
-    print(processed_data.head())
+    print(processed_data.dtypes)
+    processed_data.to_csv("processed_data.csv", index=False)
