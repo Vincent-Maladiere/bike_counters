@@ -1,0 +1,14 @@
+Raw Data --> [Data Cleaning] --> [Feature Engineering] --> [Preprocessing] --> [Model Training] --> Trained Model
+                |                     |                        |                  |                     |
+                +-- Handle Missing    +-- Add Derived Features +-- Scale/Encode   +-- Train/Test Split  +-- Hyperparameter Tuning
+                |                     +-- Polynomial Features  +-- PCA/Dim Red.   +-- Cross Validation  +-- Ensemble Learning
+                |                     +-- Interaction Terms    +-- Select K Best  +-- Train Stacking    +-- Save Model
+                |                     +-- Time-Based Features  +-- Handle Outliers|
+                +-- Remove Outliers   
+                +-- Normalize Text    +-- Text Embeddings      |
+                +-- Tokenize Text     +-- Impute Missing Values|
+
+
+
+Tokenize Text: par exemple dans les description de la météo
+Text Embeddings: simplement pour flex et surement inutile
