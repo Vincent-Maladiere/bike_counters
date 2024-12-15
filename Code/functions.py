@@ -35,19 +35,13 @@ def date_encoder(df, date_col="date"):
 
 def cyclical_encoding(df, col, max_val):
     df = df.copy()
-    """Encodes a cyclical feature."""
     df[col + "_sin"] = np.sin(2 * np.pi * df[col] / max_val)
     df[col + "_cos"] = np.cos(2 * np.pi * df[col] / max_val)
-    # df.drop(columns=[col], inplace=True)
+    df.drop(columns=[col], inplace=True)
     return df
 
 def prepare_data(df_orig, external_df):
     df_orig['index'] = np.arange(df_orig.shape[0])
-    """
-    Prepares the dataset by merging external data and encoding features. 
-    Does everything done and explained in the EDA notebook to clean data 
-    and feature engineer so it can be done on the test set too.
-    """
 
     # Handle missing values in the external dataset
     external_df.drop(columns=external_df.columns[(external_df.isnull().sum() / len(external_df)) > 0.1], inplace=True)
@@ -64,13 +58,13 @@ def prepare_data(df_orig, external_df):
     # Merge datasets
     df = pd.merge_asof(df_orig.sort_values("date"), external_df.sort_values("date"), on="date")
 
-    # # Add quarantine dates
-    # df["quarantine1"] = ((df["date"] >= "2020-10-30") & (df["date"] <= "2020-12-14")).astype(int)
-    # df["quarantine2"] = ((df["date"] >= "2020-04-03") & (df["date"] <= "2020-05-02")).astype(int)
+    # Add quarantine dates
+    df["quarantine1"] = ((df["date"] >= "2020-10-30") & (df["date"] <= "2020-12-14")).astype(int)
+    df["quarantine2"] = ((df["date"] >= "2020-04-03") & (df["date"] <= "2020-05-02")).astype(int)
 
-    # # Add holiday information
-    # school_holidays = SchoolHolidayDates()
-    # jours_feries = JoursFeries()
+    # Add holiday information
+    school_holidays = SchoolHolidayDates()
+    jours_feries = JoursFeries()
 
     # df['holidays'] = df.apply(
     #     lambda row: 1 if school_holidays.is_holiday_for_zone(row['date'].date(), 'C') else 0, axis=1
@@ -84,117 +78,80 @@ def prepare_data(df_orig, external_df):
     df.drop(columns=["pres", "raf10", "rafper", "td", "w2"], axis=1, inplace=True)
 
     df.drop(columns=["counter_id", "site_id", "counter_installation_date", "counter_technical_id", "coordinates"], axis=1, inplace=True)
-    df = date_encoder(df)
+    # df = date_encoder(df)
     
     df = df.sort_values("index")
-    # df = df.drop(columns=["index"])
-    # df = cyclical_encoding(df, "month", 12)
-    # df = cyclical_encoding(df, "weekday", 7)
-    # df = cyclical_encoding(df, "hour", 24)
-    # df = cyclical_encoding(df, "day", 31)
-    # df.drop(columns=["date"], inplace=True)
 
     return df
 
-def encoder(X):
+def create_preprocessor():
+    """
+    Creates a preprocessing pipeline that handles numerical, categorical, and date features.
+    Returns a ColumnTransformer object that can be used in a sklearn pipeline.
+    """
+    # Numerical features
+    numerical_features = ["tend", "cod_tend", "dd", "ff", "t", "u", "vv", "ww", "w1", "n", 
+                         "nbas", "tend24", "etat_sol", "ht_neige", "rr1", "rr3", "rr6", 
+                         "rr12", "rr24", "latitude", "longitude"]
     
-    # 1. numerical features
-    num_cols = ["tend", "cod_tend", "dd", "ff", "t", "u", "vv", "ww", "w1", "n", 
-                "nbas", "tend24", "etat_sol", "ht_neige", "rr1", "rr3", "rr6", 
-                "rr12", "rr24", "latitude", "longitude"]
-
-    num_cols = [col for col in num_cols if col in X.columns]
-    num_transformer = StandardScaler()
-    X[num_cols] = num_transformer.fit_transform(X[num_cols])
-
-    # 2. categorical features
-    X = date_encoder(X)
-    encoderr = OneHotEncoder(handle_unknown="ignore", sparse_output=False)
-    encoded_features = encoderr.fit_transform(X[["counter_name", "site_name"]])
-    encoded_df = pd.DataFrame(
-        encoded_features,
-        columns=encoderr.get_feature_names_out(["counter_name", "site_name"]),
-        index=X.index
+    # Categorical features
+    categorical_features = ["counter_name", "site_name"]
+    
+    # Date features
+    cyclical_features = ["month", "day", "hour", "weekday"]
+    
+    def cyclical_transform(X):
+        X = X.copy()
+        # Cyclical encoding for temporal features
+        X = cyclical_encoding(X, "month", 12)
+        X = cyclical_encoding(X, "weekday", 7)
+        X = cyclical_encoding(X, "hour", 24)
+        X = cyclical_encoding(X, "day", 31)
+        return X
+    
+    def date_transform(X):
+        X = X.copy()
+        return date_encoder(X)
+    
+    # Preprocessing steps
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ("num", StandardScaler(), numerical_features),
+            ("cat", OneHotEncoder(handle_unknown="ignore", sparse_output=False), categorical_features),
+        ],
+        remainder='passthrough'
     )
-    # Drop original columns and add encoded features
-    X = X.drop(columns=["counter_name", "site_name"], errors="ignore")
-    X = pd.concat([X, encoded_df], axis=1)
-
-    # 3. date features
-    date_encoder2 = FunctionTransformer(cyclical_encoding)
-    X = date_encoder2.fit_transform(X, "month", 12)
-    X = date_encoder2.fit_transform(X, "weekday", 7)
-    X = date_encoder2.fit_transform(X, "hour", 24)
-    X = date_encoder2.fit_transform(X, "day", 31)
-
-    # X = cyclical_encoding(X, "month", 12)
-    # X = cyclical_encoding(X, "weekday", 7)
-    # X = cyclical_encoding(X, "hour", 24)
-    # X = cyclical_encoding(X, "day", 31)
-
-    X.reset_index(drop=True, inplace=True)
-    X.drop(columns=["date"], inplace=True)
-    pd.set_option('display.max_columns', None)
-    print(X.columns)
-
-    return X
-
-def fit_encoder(X_train):
-    X_train = date_encoder(X_train)
-
-    global year_encoder, month_encoder, weekday_encoder, category_encoder, numerical_encoder
-    year_encoder = OneHotEncoder(sparse_output=False, handle_unknown='ignore').fit(X_train[["year"]])
-    month_encoder = OneHotEncoder(sparse_output=False, handle_unknown='ignore').fit(X_train[["month"]])
-    weekday_encoder = OneHotEncoder(sparse_output=False, handle_unknown='ignore').fit(X_train[["weekday"]])
-    category_encoder = OneHotEncoder(sparse_output=False, handle_unknown='ignore').fit(X_train[['counter_name', 'site_name']])
-    numerical_encoder = StandardScaler().fit(X_train[[ 'cod_tend', 't', 'u', 'etat_sol']])
-
-
-def encoder(X):
-    X = X.copy()
-    X = date_encoder(X)
-
-    X = cyclical_encoding(X, 'hour', 23)
-    X = cyclical_encoding(X, 'day', 31)
-
-    years_encoded = year_encoder.transform(X[["year"]])
-    months_encoded = month_encoder.transform(X[["month"]])
-    weekdays_encoded = weekday_encoder.transform(X[["weekday"]])
-    categories_encoded = category_encoder.transform(X[['counter_name', 'site_name']])
-    numerical_encoded = numerical_encoder.transform(X[[ 'cod_tend', 't', 'u', 'etat_sol']])
     
-    years_df = pd.DataFrame(years_encoded, columns=["2020","2021"])
-    months_df = pd.DataFrame(months_encoded, columns=["janv","fev","mars","avril","mai","juin","juillet","aout","sept","octobre","novem","decembre"])
-    weekdays_df = pd.DataFrame(weekdays_encoded, columns=[f"weekday_{i}" for i in range(weekdays_encoded.shape[1])])
-    categories_df = pd.DataFrame(categories_encoded, columns=[f"cat_{i}" for i in range(categories_encoded.shape[1])])
-    numercial_df = pd.DataFrame(numerical_encoded, columns = ([ 'cod_tend', 't', 'u', 'etat_sol']))
+    # Preprocessing pipeline
+    full_preprocessor = Pipeline([
+        ('date_encoding', FunctionTransformer(date_transform)),
+        ('cyclical_encoding', FunctionTransformer(cyclical_transform)),
+        ('column_transformer', preprocessor),
+    ])
     
-    X.reset_index(drop=True, inplace=True)
+    return full_preprocessor
 
-    # Concatenate all features
-    X = pd.concat([X, years_df, months_df, weekdays_df, categories_df,numercial_df], axis=1)
-    X.drop(columns=['year', 'date', 'month', 'weekday', 'day','hour', 'counter_name', 'site_name','cod_tend', 't', 'u', 'etat_sol'], inplace = True)
-    
-    return X
+def build_pipeline(model):
 
-def build_pipeline(X_train, y_train, model):
-
-    pipeline = make_pipeline(steps=[("preprocessor", preprocessor), ("model", model)])
+    preprocessor = create_preprocessor()
+    pipeline = make_pipeline(preprocessor, model)
 
     return pipeline
 
-def train_model(X_train, y_train, model):
-
-    transformer = FunctionTransformer(encoder)
-    pipeline = make_pipeline(transformer, model)
+def train_and_evaluate_model(X_train, X_test, y_train, y_test, model):
+        
+    pipeline = build_pipeline(model)
     pipeline.fit(X_train, y_train)
-
-    return pipeline
-
-
-def test_model_kaggle(pipeline, X_test, model):
     
     y_pred = pipeline.predict(X_test)
+    rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+    
+    return pipeline, rmse
+
+
+def test_model_kaggle(pipeline, X_test2, model):
+    
+    y_pred = pipeline.predict(X_test2)
 
     results = pd.DataFrame(
         dict(
@@ -207,7 +164,6 @@ def test_model_kaggle(pipeline, X_test, model):
     return results, print("Submission file created, check data folder")
 
 def tune_hyperparameters(pipeline, X_train, y_train):
-    """Tunes hyperparameters using GridSearchCV."""
     param_grid = {
         "model__n_estimators": [50, 100, 200],
         "model__max_depth": [10, 20, None],
@@ -220,12 +176,12 @@ def tune_hyperparameters(pipeline, X_train, y_train):
     return grid_search
 
 def evaluate_model(model, X_test, y_test):
-    """Evaluates the model and computes RMSE."""
+    """Evaluates the model and compute RMSE."""
     y_pred = model.predict(X_test)
     rmse = np.sqrt(mean_squared_error(y_pred, y_test))
     print(f"RMSE: {rmse}")
     print(y_test)
     plt.figure(figsize=(10, 6))
-    # sns.scatterplot(x=X_test, y=y_pred, color="blue")
-    # sns.scatterplot(x=X_test, y=y_test, color="red")
+    sns.scatterplot(x=np.array(X_test), y=y_pred, color="blue")
+    sns.scatterplot(x=np.array(X_test), y=y_test, color="red")
     return rmse
