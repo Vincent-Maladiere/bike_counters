@@ -30,7 +30,7 @@ def date_encoder(df, date_col="date"):
     df["day"] = df[date_col].dt.day
     df["weekday"] = df[date_col].dt.weekday
     df["hour"] = df[date_col].dt.hour
-    # df.drop(columns=[date_col], inplace=True)
+    df.drop(columns=[date_col], inplace=True)
     return df
 
 def cyclical_encoding(df, col, max_val):
@@ -59,9 +59,29 @@ def prepare_data(df_orig, external_df):
     df = pd.merge_asof(df_orig.sort_values("date"), external_df.sort_values("date"), on="date")
 
     # Add quarantine dates
-    df["quarantine1"] = ((df["date"] >= "2020-10-30") & (df["date"] <= "2020-12-14")).astype(int)
-    df["quarantine2"] = ((df["date"] >= "2020-04-03") & (df["date"] <= "2020-05-02")).astype(int)
+    df["quarantine1"] = np.where((df['date'] >= '2020-10-30') & (df['date'] <= '2020-12-14'), 1, 0)
+    df["quarantine2"] = np.where((df['date'] >= '2020-04-03') & (df['date'] <= '2020-05-02'), 1, 0)
 
+    # add seasons
+    df["spring"] = np.where((df['date'] >= '2020-03-21') & (df['date'] < '2020-06-21'), 1, 0)
+    df["summer"] = np.where((df['date'] >= '2020-06-21') & (df['date'] < '2020-09-21'), 1, 0)
+    df["autumn"] = np.where((df['date'] >= '2020-03-21') & (df['date'] <= '2020-09-21'), 1, 0)
+    df["winter"] = np.where((df['date'] >= '2020-03-21') & (df['date'] <= '2020-12-21'), 1, 0)
+
+    df["christmas"] = np.where((df['date'] >= '2020-12-18') & (df['date'] <= '2021-01-03'), 1, 0)
+
+    # adding a distance feature from the center of Paris
+    def calculate_distance_from_center(df, center_lat=48.8566, center_lon=2.3522):
+        lat_km = 111  # Scale for latitude in km
+        lon_km = 111 * np.cos(np.radians(center_lat))  # Scale for longitude, adjusted for latitude
+        
+        df["distance_from_center"] = np.sqrt(
+            ((df["latitude"] - center_lat) * lat_km)**2 +
+            ((df["longitude"] - center_lon) * lon_km)**2
+        )
+        return df
+
+    df = calculate_distance_from_center(df)
     # Add holiday information
     school_holidays = SchoolHolidayDates()
     jours_feries = JoursFeries()
@@ -78,7 +98,6 @@ def prepare_data(df_orig, external_df):
     df.drop(columns=["pres", "raf10", "rafper", "td", "w2"], axis=1, inplace=True)
 
     df.drop(columns=["counter_id", "site_id", "counter_installation_date", "counter_technical_id", "coordinates"], axis=1, inplace=True)
-    # df = date_encoder(df)
     
     df = df.sort_values("index")
 
@@ -98,12 +117,12 @@ def create_preprocessor():
     categorical_features = ["counter_name", "site_name"]
     
     # Date features
-    cyclical_features = ["month", "day", "hour", "weekday"]
+    cyclical_features = ["day", "hour", "weekday"]
     
     def cyclical_transform(X):
         X = X.copy()
         # Cyclical encoding for temporal features
-        X = cyclical_encoding(X, "month", 12)
+        # X = cyclical_encoding(X, "month", 12)
         X = cyclical_encoding(X, "weekday", 7)
         X = cyclical_encoding(X, "hour", 24)
         X = cyclical_encoding(X, "day", 31)
@@ -134,8 +153,10 @@ def create_preprocessor():
 def build_pipeline(model):
 
     preprocessor = create_preprocessor()
-    pipeline = make_pipeline(preprocessor, model)
-
+    pipeline = Pipeline([
+        ('preprocessor', preprocessor),
+        ('regressor', model)
+    ])
     return pipeline
 
 def train_and_evaluate_model(X_train, X_test, y_train, y_test, model):
@@ -146,8 +167,31 @@ def train_and_evaluate_model(X_train, X_test, y_train, y_test, model):
     y_pred = pipeline.predict(X_test)
     rmse = np.sqrt(mean_squared_error(y_test, y_pred))
     
+    # plot of predicted vs actual values
+    plt.figure(figsize=(6, 4))
+    sns.scatterplot(x=y_test, y=y_pred)
+    plt.xlabel('Actual Values')
+    plt.ylabel('Predicted Values')
+    plt.title(f'Actual vs Predicted Values\nRMSE: {rmse:.4f}')
+    
+    # Add a perfect prediction line (x=y)
+    line = [min(y_test), max(y_test)]
+    plt.plot(line, line, 'r--', alpha=0.5)
+    
     return pipeline, rmse
 
+def tune_hyperparameters(pipeline, X_train, y_train):
+    param_grid = {
+        'regressor__colsample_bytree': [0.3, 0.5, 0.7, None],
+        'regressor__learning_rate': [0.01, 0.05, 0.1, None],
+        'regressor__max_depth': [3, 5, 7, None],
+        'regressor__n_estimators': [100, 200, 300, None]
+    }
+
+    grid_search = GridSearchCV(pipeline, param_grid, cv=5, scoring="neg_mean_squared_error", n_jobs=-1, verbose=1)
+    grid_search.fit(X_train, y_train)
+
+    return grid_search
 
 def test_model_kaggle(pipeline, X_test2, model):
     
@@ -161,27 +205,4 @@ def test_model_kaggle(pipeline, X_test2, model):
     )
     results.to_csv(f"//Users/solalzana/Desktop/X/Python for Data Science/Final Project/bike_counters/Submissions/submission_{model}.csv", index=False)
 
-    return results, print("Submission file created, check data folder")
-
-def tune_hyperparameters(pipeline, X_train, y_train):
-    param_grid = {
-        "model__n_estimators": [50, 100, 200],
-        "model__max_depth": [10, 20, None],
-        "model__min_samples_split": [2, 5, 10]
-    }
-
-    grid_search = GridSearchCV(pipeline, param_grid, cv=5, scoring="neg_mean_squared_error", n_jobs=-1, verbose=1)
-    grid_search.fit(X_train, y_train)
-
-    return grid_search
-
-def evaluate_model(model, X_test, y_test):
-    """Evaluates the model and compute RMSE."""
-    y_pred = model.predict(X_test)
-    rmse = np.sqrt(mean_squared_error(y_pred, y_test))
-    print(f"RMSE: {rmse}")
-    print(y_test)
-    plt.figure(figsize=(10, 6))
-    sns.scatterplot(x=np.array(X_test), y=y_pred, color="blue")
-    sns.scatterplot(x=np.array(X_test), y=y_test, color="red")
-    return rmse
+    print ("Submission file created, check data folder")
